@@ -3,10 +3,9 @@
 To create a release with Pixi run the following commands on the **devel** branch:
 
 ```bash
-PINOCCHIO_VERSION=X.Y.Z pixi run release_new_version
+PINOCCHIO_VERSION=X.Y.Z pixi run release-new-version
 git push origin
 git push origin vX.Y.Z
-git push origin devel:master
 ```
 
 Where `X.Y.Z` is the new version.

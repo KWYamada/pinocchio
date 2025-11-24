@@ -19,8 +19,11 @@
 namespace bp = boost::python;
 using namespace pinocchio::python;
 
+void pinocchio_numpy_init();
+
 BOOST_PYTHON_MODULE(PINOCCHIO_PYTHON_MODULE_NAME)
 {
+  pinocchio_numpy_init();
   bp::docstring_options module_docstring_options(true, true, false);
 
   bp::scope().attr("__version__") = pinocchio::printVersion();
@@ -112,8 +115,8 @@ BOOST_PYTHON_MODULE(PINOCCHIO_PYTHON_MODULE_NAME)
   exposeSampleModels();
 #if defined(PINOCCHIO_PYTHON_INTERFACE_MAIN_MODULE)
   exposeGeometry();
-  exposeParsers();
 #endif // defined(PINOCCHIO_PYTHON_INTERFACE_MAIN_MODULE)
+  exposeParsers();
 
   exposeAlgorithms();
   exposeExtras();

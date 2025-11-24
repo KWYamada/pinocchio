@@ -3,7 +3,7 @@
 # Copyright (c) 2015 Wandercraft, 86 rue de Paris 91400 Orsay, France.
 #
 
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.22)
 
 set(PROJECT_NAME pinocchio)
 set(PROJECT_DESCRIPTION
@@ -11,7 +11,9 @@ set(PROJECT_DESCRIPTION
 )
 set(PROJECT_URL "http://github.com/stack-of-tasks/pinocchio")
 set(PROJECT_CUSTOM_HEADER_EXTENSION "hpp")
-set(PROJECT_USE_CMAKE_EXPORT TRUE)
+if(NOT BUILD_STANDALONE_PYTHON_INTERFACE)
+  set(PROJECT_USE_CMAKE_EXPORT TRUE)
+endif()
 set(PROJECT_USE_KEYWORD_LINK_LIBRARIES TRUE)
 set(PROJECT_COMPATIBILITY_VERSION AnyNewerVersion)
 set(PINOCCHIO_PROJECT_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR})
@@ -34,27 +36,17 @@ set(JRL_CMAKE_MODULES "${CMAKE_CURRENT_LIST_DIR}/cmake")
 if(EXISTS "${JRL_CMAKE_MODULES}/base.cmake")
   message(STATUS "JRL cmakemodules found in 'cmake/' git submodule")
 else()
-  find_package(jrl-cmakemodules QUIET CONFIG)
+  # Explicitly look for the installed jrl-cmakemodules-config.cmake
+  # vcpkg installs it in share/jrl-cmakemodules
+  find_package(jrl-cmakemodules CONFIG REQUIRED)
   if(jrl-cmakemodules_FOUND)
     get_property(
       JRL_CMAKE_MODULES
       TARGET jrl-cmakemodules::jrl-cmakemodules
       PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
     message(STATUS "JRL cmakemodules found on system at ${JRL_CMAKE_MODULES}")
-  elseif(${CMAKE_VERSION} VERSION_LESS "3.14.0")
-    message(
-      FATAL_ERROR
-        "\nCan't find jrl-cmakemodules. Please either:\n"
-        "  - use git submodule: 'git submodule update --init'\n"
-        "  - or install https://github.com/jrl-umi3218/jrl-cmakemodules\n"
-        "  - or upgrade your CMake version to >= 3.14 to allow automatic fetching\n")
   else()
-    message(STATUS "JRL cmakemodules not found. Let's fetch it.")
-    include(FetchContent)
-    FetchContent_Declare("jrl-cmakemodules"
-                         GIT_REPOSITORY "https://github.com/jrl-umi3218/jrl-cmakemodules.git")
-    FetchContent_MakeAvailable("jrl-cmakemodules")
-    FetchContent_GetProperties("jrl-cmakemodules" SOURCE_DIR JRL_CMAKE_MODULES)
+    message(FATAL_ERROR "JRL cmakemodules not found and fetching is disabled to prevent recursion.")
   endif()
 endif()
 
@@ -83,6 +75,55 @@ if(POLICY CMP0177)
   set(CMAKE_POLICY_DEFAULT_CMP0177 NEW)
 endif()
 include("${JRL_CMAKE_MODULES}/base.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/OverrideJrlCMake.cmake")
+
+# Include overrides after defining our project
+# This is needed because jrl-cmakemodules might be loaded before OverrideJrlCMake
+# if we don't do it carefully.
+# But wait, jrl-cmakemodules is loaded at line 80 via include(base.cmake)
+# and OverrideJrlCMake at line 81.
+# The issue is that jrl-cmakemodules uses pkg-config for everything.
+# Our override intercepts add_project_dependency.
+
+# The recursion happens because find_package(SomePackage) (from vcpkg) 
+# might trigger something that calls add_project_dependency again or find_package again.
+
+# In vcpkg mode, we want to avoid pkg-config completely.
+# We already have DisablePkgConfig.cmake but it seems not used or not effective enough.
+
+# Let's ensure our override is loaded BEFORE project() is called if possible,
+# or at least ensure that calls inside project() don't trigger this.
+# But project() is at line 84.
+
+# The recursion stack trace shows:
+# vcpkg/scripts/buildsystems/vcpkg.cmake:908 (_find_package)
+# ...
+# build/cp310-cp310-win_amd64/_deps/jrl-cmakemodules-src/pkg-config.cmake:18 (find_package)
+# build/cp310-cp310-win_amd64/_deps/jrl-cmakemodules-src/post-project.cmake:12 (include)
+# CMakeLists.txt:84 (project)
+
+# jrl-cmakemodules hooks into project() via CMAKE_PROJECT_INCLUDE or similar mechanism?
+# Actually, `project()` in CMakeLists.txt triggers vcpkg toolchain.
+# vcpkg toolchain seems to be interacting with jrl-cmakemodules that was fetched?
+# Wait, line 48: include(FetchContent) ... FetchContent_MakeAvailable("jrl-cmakemodules")
+# This downloads jrl-cmakemodules into build dir.
+
+# The recursion happens inside project() call.
+# This is likely because jrl-cmakemodules sets up some variables or hooks.
+# post-project.cmake inclusion seems to be the key.
+
+# To fix this, we should prevent jrl-cmakemodules from doing its automatic things
+# or ensure we don't use the fetched jrl-cmakemodules if we can avoid it.
+# But we need it for macros.
+
+# The error trace shows `pkg-config.cmake:18 (find_package)`.
+# This means jrl-cmakemodules is trying to find PkgConfig.
+# We can prevent this by faking PkgConfig BEFORE project() call.
+
+# Let's try to set PkgConfig as found before project().
+set(PkgConfig_FOUND TRUE CACHE BOOL "Mock PkgConfig" FORCE)
+set(PKG_CONFIG_FOUND TRUE CACHE BOOL "Mock PkgConfig" FORCE)
+set(PKG_CONFIG_EXECUTABLE "echo" CACHE STRING "Mock PkgConfig" FORCE)
 
 compute_project_args(PROJECT_ARGS LANGUAGES CXX)
 project(${PROJECT_NAME} ${PROJECT_ARGS})
@@ -91,30 +132,18 @@ include("${JRL_CMAKE_MODULES}/python.cmake")
 include("${JRL_CMAKE_MODULES}/boost.cmake")
 include("${JRL_CMAKE_MODULES}/ide.cmake")
 include("${JRL_CMAKE_MODULES}/apple.cmake")
-if(APPLE) # Use the handmade approach
-  if(${CMAKE_VERSION} VERSION_LESS "3.18.0") # Need to find the right version
-    set(CMAKE_MODULE_PATH ${JRL_CMAKE_MODULES}/find-external/OpenMP ${CMAKE_MODULE_PATH})
-  endif()
-elseif(UNIX)
-  if(${CMAKE_VERSION} VERSION_EQUAL "3.20.0")
-    set(CMAKE_MODULE_PATH ${JRL_CMAKE_MODULES}/find-external/OpenMP ${CMAKE_MODULE_PATH})
-  endif()
-endif()
 include(CMakeDependentOption)
 
 # If needed, set CMake policy for APPLE systems
 apply_default_apple_configuration()
-if(CMAKE_VERSION VERSION_GREATER "3.12")
-  cmake_policy(SET CMP0074 NEW)
-endif()
 
 # Force C++ standard to be C++11 at least
 check_minimal_cxx_standard(11 ENFORCE)
 
 # --- OPTIONS ----------------------------------------
 option(BUILD_BENCHMARK "Build the benchmarks" OFF)
+option(BUILD_EXAMPLES "Build the examples" ON)
 option(BUILD_UTILS "Build the utils" OFF)
-option(BUILD_PYTHON_INTERFACE "Build the Python bindings" ON)
 option(GENERATE_PYTHON_STUBS "Generate the Python stubs associated to the Python library" OFF)
 option(BUILD_WITH_COMMIT_VERSION "Build libraries by setting specific commit version" OFF)
 
@@ -155,12 +184,33 @@ if(APPLE)
 else(APPLE)
   set(BUILD_WITH_ACCELERATE_SUPPORT FALSE)
 endif(APPLE)
-option(GENERATE_PYTHON_STUBS "Generate the Python stubs associated to the Python library" OFF)
 
 option(INITIALIZE_WITH_NAN "Initialize Eigen entries with NaN" OFF)
 option(CHECK_RUNTIME_MALLOC "Check if some memory allocations are performed at runtime" OFF)
 
 option(ENABLE_TEMPLATE_INSTANTIATION "Template instantiation of the main library" ON)
+
+set(PINOCCHIO_MODEL_DIR "${PROJECT_SOURCE_DIR}/models")
+
+if(BUILD_BENCHMARK
+   OR BUILD_EXAMPLES
+   OR BUILD_TESTING)
+  # example-robot-data is required
+  if(EXAMPLE_ROBOT_DATA_MODEL_DIR)
+    file(REAL_PATH "${EXAMPLE_ROBOT_DATA_MODEL_DIR}" EXAMPLE_ROBOT_DATA_MODEL_DIR EXPAND_TILDE)
+    message(STATUS "Using provided example-robot-data at: ${EXAMPLE_ROBOT_DATA_MODEL_DIR}")
+  elseif(EXISTS "${CMAKE_CURRENT_LIST_DIR}/models/example-robot-data/CMakeLists.txt")
+    set(EXAMPLE_ROBOT_DATA_MODEL_DIR "${PINOCCHIO_MODEL_DIR}/example-robot-data/robots")
+  else()
+    find_package(example-robot-data REQUIRED CONFIG)
+    get_target_property(EXAMPLE_ROBOT_DATA_MODEL_DIR_DEF example-robot-data::example-robot-data
+                        INTERFACE_COMPILE_DEFINITIONS)
+    string(REPLACE "EXAMPLE_ROBOT_DATA_MODEL_DIR=" "" EXAMPLE_ROBOT_DATA_MODEL_DIR_QUOTES
+                   "${EXAMPLE_ROBOT_DATA_MODEL_DIR_DEF}")
+    string(REPLACE "\"" "" EXAMPLE_ROBOT_DATA_MODEL_DIR "${EXAMPLE_ROBOT_DATA_MODEL_DIR_QUOTES}")
+    message(STATUS "Using system example-robot-data at: ${EXAMPLE_ROBOT_DATA_MODEL_DIR}")
+  endif()
+endif()
 
 # Variable containing all the cflags definition, options and libraries to setup pkg-config.
 set(CFLAGS_OPTIONS)
@@ -203,8 +253,6 @@ macro(TAG_LIBRARY_VERSION target)
   set_target_properties(${target} PROPERTIES SOVERSION ${PROJECT_VERSION})
 endmacro(TAG_LIBRARY_VERSION)
 
-set(PINOCCHIO_MODEL_DIR "${PROJECT_SOURCE_DIR}/models")
-
 # ----------------------------------------------------
 # --- DEPENDENCIES -----------------------------------
 # ----------------------------------------------------
@@ -227,7 +275,7 @@ if(BUILD_WITH_URDF_SUPPORT)
 endif()
 
 if(BUILD_WITH_SDF_SUPPORT)
-  include(${CMAKE_CURRENT_LIST_DIR}/cmake/sdformat.cmake)
+  include(${JRL_CMAKE_MODULES}/sdformat.cmake)
   search_for_sdformat(REQUIRED)
   if(SDFormat_FOUND)
     check_minimal_cxx_standard(11 REQUIRED)
@@ -260,6 +308,12 @@ endif(BUILD_WITH_AUTODIFF_SUPPORT)
 
 if(BUILD_WITH_CASADI_SUPPORT)
   add_project_dependency(casadi 3.4.5 REQUIRED PKG_CONFIG_REQUIRES "casadi >= 3.4.5")
+
+  # Normalize CasADi link target across versions. Prefer imported target (casadi::casadi), then
+  # legacy target (casadi)
+  if(NOT TARGET casadi::casadi AND TARGET casadi)
+    add_library(casadi::casadi ALIAS casadi)
+  endif()
   list(APPEND LIBRARIES_DEPENDENCIES ${PROJECT_NAME}_casadi)
 endif(BUILD_WITH_CASADI_SUPPORT)
 
@@ -273,7 +327,7 @@ if(BUILD_WITH_EXTRA_SUPPORT)
   message(STATUS "Found Qhull.")
 endif()
 
-set(BOOST_REQUIRED_COMPONENTS filesystem serialization system)
+set(BOOST_REQUIRED_COMPONENTS filesystem serialization)
 
 set_boost_default_options()
 export_boost_default_options()
@@ -301,6 +355,9 @@ if(BUILD_PYTHON_INTERFACE)
   set(PYTHON_COMPONENTS Interpreter Development NumPy)
   findpython(REQUIRED)
   add_project_dependency(eigenpy 2.7.10 REQUIRED)
+  if(BUILD_STANDALONE_PYTHON_INTERFACE)
+    add_project_dependency(${PROJECT_NAME} REQUIRED CONFIG)
+  endif()
 
   if(BUILD_WITH_URDF_SUPPORT)
     # console_bridge is urdfdom dependency.
@@ -330,6 +387,7 @@ else()
 endif()
 
 if(BUILD_WITH_HPP_FCL_SUPPORT)
+  set(COAL_DISABLE_HPP_FCL_WARNINGS ON)
   add_project_dependency(hpp-fcl REQUIRED)
 endif()
 
@@ -380,6 +438,12 @@ endif()
 
 # HPP-FCL sources
 if(BUILD_WITH_HPP_FCL_SUPPORT)
+  list(APPEND ${PROJECT_NAME}_PARSERS_SOURCES ${${PROJECT_NAME}_GRAPH_GEOMETRY_SOURCES})
+  list(APPEND ${PROJECT_NAME}_PARSERS_PUBLIC_HEADERS ${${PROJECT_NAME}_GRAPH_GEOMETRY_HEADERS})
+
+  list(APPEND ${PROJECT_NAME}_BINDINGS_PYTHON_SOURCES
+       ${${PROJECT_NAME}_BINDINGS_GRAPH_GEOMETRY_SOURCES})
+
   if(ENABLE_TEMPLATE_INSTANTIATION)
     list(APPEND ${PROJECT_NAME}_COLLISION_SOURCES
          ${${PROJECT_NAME}_COLLISION_TEMPLATE_INSTANTIATION_SOURCES})
@@ -430,9 +494,7 @@ if(BUILD_WITH_OPENMP_SUPPORT)
   list(APPEND ${PROJECT_NAME}_HEADERS ${${PROJECT_NAME}_PARALLEL_PUBLIC_HEADERS})
 endif()
 
-if(BUILD_PYTHON_INTERFACE)
-  list(APPEND ${PROJECT_NAME}_HEADERS ${${PROJECT_NAME}_BINDINGS_PYTHON_PUBLIC_HEADERS})
-endif()
+list(APPEND ${PROJECT_NAME}_HEADERS ${${PROJECT_NAME}_BINDINGS_PYTHON_PUBLIC_HEADERS})
 
 # Define PINOCCHIO_WINDOWS_DLL_PATH environment variable on Windows
 function(ADD_WINDOWS_DLL_PATH_TO_TEST TEST_NAME)
@@ -440,16 +502,20 @@ function(ADD_WINDOWS_DLL_PATH_TO_TEST TEST_NAME)
     get_test_property(${TEST_NAME} ENVIRONMENT ENV_VARIABLES)
     # TODO don't do this in the future
     list(APPEND ENV_VARIABLES
-         "PINOCCHIO_WINDOWS_DLL_PATH=$<TARGET_FILE_DIR:${PROJECT_NAME}_default>")
+         "PINOCCHIO_WINDOWS_DLL_PATH=$<TARGET_FILE_DIR:${PROJECT_NAME}::${PROJECT_NAME}_default>")
     set_tests_properties(${TEST_NAME} PROPERTIES ENVIRONMENT "${ENV_VARIABLES}")
   endif()
 endfunction()
 
 # --- MAIN LIBRARY -------------------------------------------------------------
-add_subdirectory(src)
+if(NOT BUILD_STANDALONE_PYTHON_INTERFACE)
+  add_subdirectory(src)
+endif()
 
 # --- BINDINGS -----------------------------------------------------------------
-add_subdirectory(bindings)
+if(BUILD_PYTHON_INTERFACE)
+  add_subdirectory(bindings)
+endif()
 
 # --- EXECUTABLES --------------------------------------------------------------
 add_subdirectory(utils)
@@ -458,10 +524,12 @@ add_subdirectory(utils)
 add_subdirectory(unittest)
 
 # --- CHECK EXAMPLES -----------------------------------------------------------
-add_subdirectory(examples)
+if(BUILD_EXAMPLES)
+  add_subdirectory(examples)
+endif()
 
 # --- BENCHMARKS ---------------------------------------------------------------
-if(BUILD_BENCHMARK)
+if(BUILD_BENCHMARK AND NOT BUILD_STANDALONE_PYTHON_INTERFACE)
   add_subdirectory(benchmark)
 endif()
 
@@ -521,8 +589,5 @@ foreach(boostlib ${BOOST_REQUIRED_COMPONENTS})
 endforeach()
 pkg_config_append_cflags("${CFLAGS_DEPENDENCIES}")
 pkg_config_append_cflags("${CFLAGS_OPTIONS}")
-
-# Install catkin package.xml
-install(FILES package.xml DESTINATION share/${PROJECT_NAME})
 
 setup_project_finalize()

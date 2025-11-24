@@ -1,0 +1,7 @@
+{
+  "name": "python3",
+  "version": "3.10.15",
+  "description": "Overlay port for local Python 3.10",
+  "dependencies": []
+}
+

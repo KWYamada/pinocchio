@@ -1,0 +1,49 @@
+{
+  "name": "pinocchio",
+  "version": "3.2.0",
+  "description": "A fast and flexible implementation of Rigid Body Dynamics algorithms and their analytical derivatives",
+  "homepage": "https://github.com/stack-of-tasks/pinocchio",
+  "license": "BSD-2-Clause",
+  "dependencies": [
+    {
+      "name": "boost-filesystem",
+      "version>=": "1.89.0"
+    },
+    {
+      "name": "boost-serialization",
+      "version>=": "1.89.0"
+    },
+    {
+      "name": "boost-asio",
+      "version>=": "1.89.0"
+    },
+    {
+      "name": "boost-iostreams",
+      "version>=": "1.89.0"
+    },
+    {
+      "name": "boost-logic",
+      "version>=": "1.89.0"
+    },
+    {
+      "name": "boost-format",
+      "version>=": "1.89.0"
+    },
+    {
+      "name": "eigen3",
+      "version>=": "3.4.1"
+    },
+    {
+      "name": "urdfdom",
+      "version>=": "3.1.1"
+    },
+    {
+      "name": "eigenpy",
+      "version>=": "3.8.0"
+    },
+    {
+      "name": "jrl-cmakemodules",
+      "version>=": "2024-05-01"
+    }
+  ]
+}

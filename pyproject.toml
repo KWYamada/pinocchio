@@ -1,5 +1,115 @@
+[build-system]
+requires = ["scikit-build-core>=0.8.0", "pybind11>=2.11.0"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "pinocchio"
+version = "3.2.0"
+description = "A fast and flexible implementation of Rigid Body Dynamics algorithms and their analytical derivatives"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "BSD-2-Clause"}
+authors = [
+    {name = "Justin Carpentier", email = "justin.carpentier@inria.fr"},
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "numpy>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Homepage = "http://github.com/stack-of-tasks/pinocchio"
+Documentation = "https://stack-of-tasks.github.io/pinocchio/"
+
+[tool.scikit-build]
+# Minimum required version of CMake
+cmake.minimum-version = "3.22"
+
+# Use CMake directly (not through setuptools)
+cmake.build-type = "Release"
+
+# Where to install the Python package
+wheel.install-dir = "pinocchio"
+
+# Exclude unnecessary files from the wheel
+wheel.exclude = [
+    "**.cmake",
+    "**/__pycache__",
+    "*.pyc",
+]
+
+# Build settings
+build-dir = "build/{wheel_tag}"
+wheel.packages = ["bindings/python/pinocchio"]
+
+# Logging
+logging.level = "INFO"
+
+[tool.scikit-build.cmake.define]
+# Python-specific options
+BUILD_PYTHON_INTERFACE = "ON"
+BUILD_STANDALONE_PYTHON_INTERFACE = "OFF"
+GENERATE_PYTHON_STUBS = "OFF"
+
+# Build options - minimal for wheel
+BUILD_TESTING = "OFF"
+BUILD_BENCHMARK = "OFF"
+BUILD_EXAMPLES = "OFF"
+BUILD_UTILS = "OFF"
+BUILD_ADVANCED_TESTING = "OFF"
+
+# Enable URDF support (required for most users)
+BUILD_WITH_URDF_SUPPORT = "ON"
+
+# Disable optional features to minimize dependencies
+BUILD_WITH_SDF_SUPPORT = "OFF"
+BUILD_WITH_COLLISION_SUPPORT = "OFF"
+BUILD_WITH_AUTODIFF_SUPPORT = "OFF"
+BUILD_WITH_CASADI_SUPPORT = "OFF"
+BUILD_WITH_CODEGEN_SUPPORT = "OFF"
+BUILD_WITH_OPENMP_SUPPORT = "OFF"
+BUILD_WITH_EXTRA_SUPPORT = "OFF"
+
+# Template instantiation for better performance
+ENABLE_TEMPLATE_INSTANTIATION = "ON"
+
+# Windows-specific: static linking
+Boost_USE_STATIC_LIBS = "ON"
+Boost_USE_STATIC_RUNTIME = "OFF"
+
+# Ensure we find the right Python
+Python3_FIND_STRATEGY = "LOCATION"
+
+# Use wrapper toolchain that blocks pkg-config (set via CMAKE_ARGS environment variable)
+# The wrapper is at cmake/VcpkgToolchainWrapper.cmake
+
+[tool.cibuildwheel]
+# Build only cp310 for Windows AMD64
+build = "cp310-win_amd64"
+skip = "pp* *-musllinux*"
+
+# Windows-specific settings
+[tool.cibuildwheel.windows]
+before-build = "pip install delvewheel"
+repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
+
 [tool.ruff]
-exclude = [ "cmake/*", "models/example-robot-data/*" ]
+exclude = ["cmake/*", "models/example-robot-data/*"]
 
 [tool.ruff.lint]
-select = [ "E", "F", "I", "PTH", "RUF", "UP", "W" ]
+select = ["E", "F", "I", "PTH", "RUF", "UP", "W"]
+extend-ignore = ["RUF048"]

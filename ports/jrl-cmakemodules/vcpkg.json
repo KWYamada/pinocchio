@@ -1,0 +1,8 @@
+{
+  "name": "jrl-cmakemodules",
+  "version": "2024-05-01",
+  "description": "CMake modules for JRL projects",
+  "homepage": "https://github.com/jrl-umi3218/jrl-cmakemodules",
+  "license": "BSD-2-Clause"
+}
+

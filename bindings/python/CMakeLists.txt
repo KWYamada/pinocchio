@@ -87,7 +87,7 @@ function(PINOCCHIO_PYTHON_BINDINGS_SPECIFIC_TYPE scalar_name)
     ${PYTHON_LIB_NAME}
     SCOPE PUBLIC
     TARGETS eigenpy::eigenpy)
-  target_link_libraries(${PYTHON_LIB_NAME} PUBLIC ${PROJECT_NAME})
+  target_link_libraries(${PYTHON_LIB_NAME} PUBLIC ${PROJECT_NAME}::${PROJECT_NAME})
 
   if(BUILD_WITH_URDF_SUPPORT)
     # Link directly against console_bridge since we bind some enums and call
@@ -100,8 +100,9 @@ function(PINOCCHIO_PYTHON_BINDINGS_SPECIFIC_TYPE scalar_name)
       INCLUDE_DIRS ${console_bridge_INCLUDE_DIRS})
   endif()
   if(BUILD_WITH_HPP_FCL_SUPPORT)
-    target_compile_definitions(${PYTHON_LIB_NAME}
-                               PRIVATE -DPINOCCHIO_PYTHON_INTERFACE_WITH_HPP_FCL_PYTHON_BINDINGS)
+    target_compile_definitions(
+      ${PYTHON_LIB_NAME} PRIVATE PINOCCHIO_PYTHON_INTERFACE_WITH_HPP_FCL_PYTHON_BINDINGS
+                                 COAL_DISABLE_HPP_FCL_WARNINGS)
   endif()
   if(WIN32)
     target_link_libraries(${PYTHON_LIB_NAME} PUBLIC ${PYTHON_LIBRARY})
@@ -156,7 +157,15 @@ if(BUILD_PYTHON_INTERFACE)
   add_dependencies(${PROJECT_NAME}-python ${python_build_target})
 
   set(PKG_CONFIG_PYWRAP_REQUIRES "eigenpy >= 2.6.5")
-  if(IS_ABSOLUTE ${PYTHON_SITELIB})
+  if(DEFINED SKBUILD_PLATLIB_DIR AND NOT "${SKBUILD_PLATLIB_DIR}" STREQUAL "")
+    # When building wheels via scikit-build-core, the install prefix already
+    # points inside the wheel's platlib directory (see SKBUILD_PLATLIB_DIR).
+    # Installing into ${PYTHON_SITELIB} again would create the redundant
+    # lib/pythonX.Y/site-packages prefix that ends up in the wheel. Re-root the
+    # Python install dir directly inside the platlib staging area so files land
+    # at pinocchio/<module> as expected.
+    set(ABSOLUTE_PYTHON_SITELIB ${SKBUILD_PLATLIB_DIR})
+  elseif(IS_ABSOLUTE ${PYTHON_SITELIB})
     set(ABSOLUTE_PYTHON_SITELIB ${PYTHON_SITELIB})
   else()
     set(ABSOLUTE_PYTHON_SITELIB ${CMAKE_INSTALL_PREFIX}/${PYTHON_SITELIB})
@@ -224,7 +233,7 @@ if(BUILD_PYTHON_INTERFACE)
 
   if(BUILD_WITH_CASADI_SUPPORT)
     pinocchio_python_bindings_specific_type(casadi)
-    target_link_libraries(${PYWRAP}_casadi PUBLIC casadi)
+    target_link_libraries(${PYWRAP}_casadi PUBLIC casadi::casadi)
     list(APPEND STUBGEN_DEPENDENCIES "${PYWRAP}_casadi")
 
     target_precompile_headers(
@@ -275,7 +284,33 @@ if(BUILD_PYTHON_INTERFACE)
           meshcat_visualizer.py
           panda3d_visualizer.py
           rviz_visualizer.py
+          viser_visualizer.py
           visualizers.py)
+
+  if(WIN32)
+    # On Windows, copy the DLLs of the dependencies next to the python bindings.
+    # This is required because the python bindings are installed in a subdirectory
+    # of the python package, and the DLLs are not found by the python interpreter.
+
+    # 1. Install Pinocchio's own DLLs
+    set(PINOCCHIO_TARGETS pinocchio_default pinocchio_parsers pinocchio_python_parser pinocchio_visualizers)
+    foreach(tgt ${PINOCCHIO_TARGETS})
+      if(TARGET ${tgt})
+        install(TARGETS ${tgt}
+                RUNTIME DESTINATION ${PINOCCHIO_PYTHON_INSTALL_DIR}/bin
+                LIBRARY DESTINATION ${PINOCCHIO_PYTHON_INSTALL_DIR}/bin)
+      endif()
+    endforeach()
+
+    # 2. Install all DLLs from vcpkg
+    # We look in the vcpkg_installed directory inside the build tree
+    file(GLOB_RECURSE VCPKG_DLLS "${CMAKE_BINARY_DIR}/vcpkg_installed/*/bin/*.dll")
+    if(VCPKG_DLLS)
+      install(FILES ${VCPKG_DLLS} DESTINATION ${PINOCCHIO_PYTHON_INSTALL_DIR}/bin)
+    else()
+      message(WARNING "No DLLs found in ${CMAKE_BINARY_DIR}/vcpkg_installed/*/bin/*.dll")
+    endif()
+  endif()
 
   # --- STUBS --- #
   if(GENERATE_PYTHON_STUBS)
@@ -290,7 +325,7 @@ if(BUILD_PYTHON_INTERFACE)
       ${PROJECT_NAME}
       ${ABSOLUTE_PYTHON_SITELIB}
       ${PYWRAP}_default
-      ${PROJECT_NAME}_default
+      ${PROJECT_NAME}::${PROJECT_NAME}_default
       ${STUBGEN_DEPENDENCIES}
       ${python_build_target_name})
   endif(GENERATE_PYTHON_STUBS)
@@ -327,10 +362,12 @@ if(BUILD_PYTHON_INTERFACE)
   configure_file("${CMAKE_CURRENT_SOURCE_DIR}/pinocchiopy.pc.cmake"
                  "${CMAKE_CURRENT_BINARY_DIR}/pinocchiopy.pc")
 
-  install(
-    FILES "${CMAKE_CURRENT_BINARY_DIR}/pinocchiopy.pc"
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
-    PERMISSIONS OWNER_READ GROUP_READ WORLD_READ OWNER_WRITE)
+  if(NOT BUILD_STANDALONE_PYTHON_INTERFACE)
+    install(
+      FILES "${CMAKE_CURRENT_BINARY_DIR}/pinocchiopy.pc"
+      DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
+      PERMISSIONS OWNER_READ GROUP_READ WORLD_READ OWNER_WRITE)
+  endif()
 
   if(DOXYGEN_FOUND AND DOXYGEN_VERSION VERSION_GREATER 1.8.17)
     set(DOXYGEN_GENERATE_HTML YES)

@@ -1,0 +1,22 @@
+{
+  "name": "eigenpy",
+  "version": "3.8.0",
+  "description": "Bindings between Numpy and Eigen using Boost.Python",
+  "homepage": "https://github.com/stack-of-tasks/eigenpy",
+  "license": "BSD-2-Clause",
+  "dependencies": [
+    {
+      "name": "eigen3",
+      "platform": "!windows"
+    },
+    {
+      "name": "eigen3",
+      "platform": "windows"
+    },
+    "boost-python",
+    "python3",
+    "jrl-cmakemodules",
+    "vcpkg-cmake",
+    "vcpkg-cmake-config"
+  ]
+}
